@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>食材調整</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        .container {
+            margin-top: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        .list-group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .btn-add {
+            font-size: 0.9rem;
+        }
+        .input-grams {
+            width: 80px;
+        }
+        .table-danger {
+            background-color: #f8d7da;
+        }
+        .table-success {
+            background-color: #d4edda;
+        }
+        .table-horizontal-scroll {
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        .table-horizontal-scroll table {
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 栄養素計算結果 -->
+        <div class="row section">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-success text-white">栄養素計算結果</div>
+                    <div class="card-body table-horizontal-scroll">
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>項目</th>
+                                    {% for nutrient, label in data.nutrient_labels.items() %}
+                                    <th>{{ label }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody id="nutrient-results">
+                                <tr>
+                                    <td>合計値</td>
+                                    {% for nutrient in data.nutrient_labels.keys() %}
+                                    <td id="total-{{ nutrient }}">{{ data.nutrient_totals[nutrient] | round(2) }}</td>
+                                    {% endfor %}
+                                </tr>
+                                <tr>
+                                    <td>基準値</td>
+                                    {% for nutrient in data.nutrient_labels.keys() %}
+                                    <td>{{ data.aafco_standards[nutrient] | round(2) }}</td>
+                                    {% endfor %}
+                                </tr>
+                                <tr>
+                                    <td>判定</td>
+                                    {% for nutrient in data.nutrient_labels.keys() %}
+                                    <td id="status-{{ nutrient }}">
+                                        {% if data.nutrient_totals[nutrient] >= data.aafco_standards[nutrient] %}
+                                            <span class="text-success">適合</span>
+                                        {% else %}
+                                            <span class="text-danger">不適合</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 提案食材 (左側) -->
+            <div class="col-md-6 section">
+                <div class="card">
+                    <div class="card-header bg-info text-white">提案食材</div>
+                    <div class="card-body">
+                        <ul id="suggested-ingredients" class="list-group">
+                            {% for nutrient, items in data.suggestions.items() %}
+                            <li class="list-group-item">
+                                <strong>{{ data.nutrient_labels.get(nutrient, nutrient) }}</strong>
+                                <ul>
+                                    {% for item in items %}
+                                    <li class="list-group-item">
+                                        {{ item.name }} ({{ item.food_code }}) - {{ item.value | round(2) }} / 100g
+                                        <button class="btn btn-primary btn-add btn-sm" 
+                                            onclick="addProposedIngredient('{{ item.food_code }}', '{{ item.name }}', 100)">
+                                            追加
+                                        </button>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 選択した食材 (右側) -->
+            <div class="col-md-6 section">
+                <div class="card">
+                    <div class="card-header bg-warning text-white">選択した食材</div>
+                    <div class="card-body">
+                        <ul id="selected-ingredients" class="list-group">
+                            {% for item in data.selected_ingredients %}
+                            <li class="list-group-item">
+                                {{ item.name }} ({{ item.food_code }}) -
+                                <input type="number" class="form-control input-grams" value="{{ item.grams }}" 
+                                    onchange="updateIngredientGrams('{{ item.food_code }}', this.value)"> g
+                                <button class="btn btn-danger btn-sm" onclick="removeIngredient('{{ item.food_code }}')">削除</button>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        <button class="btn btn-primary mt-3" onclick="calculateNutrients()">栄養素を計算</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedIngredients = {{ data.selected_ingredients | tojson }};
+        const aafcoStandards = {{ data.aafco_standards | tojson }};
+        const nutrientLabels = {{ data.nutrient_labels | tojson }};
+    
+        // 提案食材を追加
+        function addProposedIngredient(foodCode, name, grams) {
+            console.log("Adding proposed ingredient:", foodCode, name, grams);
+    
+            if (selectedIngredients.some(item => item.food_code === foodCode)) {
+                alert("この食材はすでに選択されています。");
+                return;
+            }
+    
+            selectedIngredients.push({ food_code: foodCode, name: name, grams: grams });
+            updateSelectedIngredientsUI();
+            calculateNutrients();
+        }
+    
+        // 選択された食材を削除
+        function removeIngredient(foodCode) {
+            console.log("Removing ingredient with food code:", foodCode);
+    
+            selectedIngredients = selectedIngredients.filter(item => item.food_code !== foodCode);
+            updateSelectedIngredientsUI();
+            calculateNutrients();
+        }
+    
+        // 栄養素を計算
+        function calculateNutrients() {
+            console.log("Calculating nutrients for:", selectedIngredients);
+    
+            fetch('/calculate-nutrients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_ingredients: selectedIngredients })
+            })
+            .then(response => response.json())
+            .then(data => {
+                Object.keys(aafcoStandards).forEach(nutrient => {
+                    const totalCell = document.getElementById(`total-${nutrient}`);
+                    const statusCell = document.getElementById(`status-${nutrient}`);
+    
+                    const totalValue = data.nutrient_totals[nutrient] || 0;
+                    const standardValue = aafcoStandards[nutrient] || 0;
+    
+                    totalCell.textContent = totalValue.toFixed(2);
+                    statusCell.innerHTML = totalValue >= standardValue
+                        ? '<span class="text-success">適合</span>'
+                        : '<span class="text-danger">不適合</span>';
+                });
+            })
+            .catch(error => console.error("Error calculating nutrients:", error));
+        }
+    
+        // 選択された食材リストのUIを更新
+        function updateSelectedIngredientsUI() {
+            const list = document.getElementById('selected-ingredients');
+            list.innerHTML = '';
+    
+            selectedIngredients.forEach(item => {
+                const listItem = document.createElement('li');
+                listItem.className = 'list-group-item';
+                listItem.innerHTML = `
+                    ${item.name} (${item.food_code}) -
+                    <input type="number" class="form-control input-grams" value="${item.grams}" 
+                        onchange="updateIngredientGrams('${item.food_code}', this.value)"> g
+                    <button class="btn btn-danger btn-sm" onclick="removeIngredient('${item.food_code}')">削除</button>
+                `;
+                list.appendChild(listItem);
+            });
+        }
+    
+        // 選択した食材のグラムを更新
+        function updateIngredientGrams(foodCode, grams) {
+            console.log("Updating grams for food code:", foodCode, "to:", grams);
+    
+            const ingredient = selectedIngredients.find(item => item.food_code === foodCode);
+            if (ingredient) {
+                ingredient.grams = parseFloat(grams) || 0;
+                calculateNutrients();
+            }
+        }
+    </script>
+    
+</body>
+</html>
